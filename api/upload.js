@@ -1,4 +1,3 @@
-
 const STORE_KEY = "proxypin:captures";
 
 async function redis(command) {
