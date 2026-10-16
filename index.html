@@ -1,0 +1,254 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProxyPin Capture Dashboard</title>
+
+<style>
+:root {
+    color-scheme: dark;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    background: #0b1020;
+    color: #edf2ff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 20px;
+}
+
+main {
+    max-width: 1000px;
+    margin: auto;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+h1 { font-size: 24px; margin: 0; }
+p { color: #aab6d0; }
+
+.status {
+    font-size: 13px;
+    color: #93c5fd;
+}
+
+button {
+    background: #3478f6;
+    color: white;
+    border: 0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+button.secondary { background: #28334b; }
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.card, .capture {
+    border: 1px solid #26324a;
+    border-radius: 12px;
+    background: #121a2b;
+    padding: 16px;
+    min-width: 0;
+}
+
+.number { font-size: 26px; font-weight: 700; }
+
+.capture { margin-bottom: 14px; }
+
+.capture-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.method {
+    color: #93c5fd;
+    font-weight: 700;
+}
+
+.url {
+    overflow-wrap: anywhere;
+    color: #d8e4ff;
+    margin: 12px 0;
+}
+
+pre {
+    background: #080d18;
+    padding: 14px;
+    border-radius: 8px;
+    overflow: auto;
+    max-height: 420px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+
+.error { color: #fca5a5; }
+
+@media (max-width: 500px) {
+    body { padding: 12px; }
+    h1 { font-size: 20px; }
+}
+</style>
+</head>
+
+<body>
+<main>
+    <header>
+        <div>
+            <h1>ProxyPin Captures</h1>
+            <p>Panel de solicitudes y respuestas</p>
+            <div class="status" id="status">Conectando...</div>
+        </div>
+        <button id="refresh">Actualizar</button>
+    </header>
+
+    <section class="stats">
+        <div class="card">
+            <div class="number" id="count">0</div>
+            <p>Capturas almacenadas</p>
+        </div>
+        <div class="card">
+            <div class="number" id="latest">—</div>
+            <p>Última actualización</p>
+        </div>
+    </section>
+
+    <section id="captures"></section>
+</main>
+
+<script>
+const API = "/api/upload";
+
+const statusEl = document.getElementById("status");
+const capturesEl = document.getElementById("captures");
+
+function element(tag, className, text) {
+    const el = document.createElement(tag);
+    if (className) el.className = className;
+    if (text !== undefined) el.textContent = text;
+    return el;
+}
+
+function showCapture(capture) {
+    const card = element("article", "capture");
+    const top = element("div", "capture-top");
+
+    const request = capture.request || {};
+    const response = capture.response || {};
+
+    top.append(
+        element("span", "method",
+            String(request.method || "REQUEST")),
+        element("span", "status",
+            response.status !== undefined
+                ? "HTTP " + response.status
+                : "Respuesta no disponible")
+    );
+
+    card.append(top);
+
+    card.append(element("div", "url",
+        request.url || capture.url || "URL no disponible"));
+
+    card.append(element("p", "",
+        "Recibida: " + (capture.receivedAt || capture.startedDateTime || "—")));
+
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Ver JSON de la captura";
+    details.append(summary);
+
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(capture, null, 2);
+    details.append(pre);
+
+    const copy = element("button", "secondary", "Copiar JSON");
+    copy.addEventListener("click", async () => {
+        try {
+            await navigator.clipboard.writeText(
+                JSON.stringify(capture, null, 2)
+            );
+            copy.textContent = "Copiado";
+        } catch (_) {
+            copy.textContent = "No se pudo copiar";
+        }
+    });
+
+    details.append(copy);
+    card.append(details);
+
+    return card;
+}
+
+async function loadCaptures() {
+    try {
+        const response = await fetch(API, {
+            method: "GET",
+            cache: "no-store"
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || "HTTP " + response.status);
+        }
+
+        const captures = result.captures || [];
+        capturesEl.replaceChildren();
+
+        if (captures.length === 0) {
+            capturesEl.append(element(
+                "div",
+                "card",
+                "Todavía no hay capturas. Activa el reporte en ProxyPin."
+            ));
+        } else {
+            for (const capture of captures) {
+                capturesEl.append(showCapture(capture));
+            }
+        }
+
+        document.getElementById("count").textContent = captures.length;
+        document.getElementById("latest").textContent =
+            new Date().toLocaleTimeString();
+
+        statusEl.textContent = "Conectado · actualización automática cada 2 s";
+        statusEl.className = "status";
+    } catch (error) {
+        statusEl.textContent = "Error: " + error.message;
+        statusEl.className = "status error";
+    }
+}
+
+document.getElementById("refresh").addEventListener(
+    "click",
+    loadCaptures
+);
+
+loadCaptures();
+setInterval(loadCaptures, 2000);
+</script>
+</body>
+</html>
